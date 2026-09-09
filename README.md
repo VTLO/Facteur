@@ -32,6 +32,14 @@ schedule or against a target list:
   and, if issued, displays the resulting `user_code`/`verification_uri` as a pretext.
   This only displays the pretext for you to relay through your engagement's own approved
   channel — the app never contacts or messages a target itself.
+- **CORS misconfiguration** — sends a test `Origin` header and reports whether it's
+  reflected back in `Access-Control-Allow-Origin` (especially combined with
+  `Allow-Credentials: true`).
+- **Hidden file / secret exposure** — checks a fixed list of common sensitive paths
+  (`.env`, `.git/HEAD`, `config.json`, ...) for unauthenticated access.
+- **Reflected XSS probe** — sends a marker containing HTML-special characters (`"'<>`,
+  no script tags) and reports whether it comes back unescaped, without ever constructing
+  or executing a working payload.
 
 ## Building
 

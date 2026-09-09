@@ -5,6 +5,7 @@ import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
@@ -191,6 +192,107 @@ fun scanOauthDevicePhishing(oktaDomain: String, clientId: String): PocResult {
                 log += "Response: ${bodyText.take(300)}"
                 PocResult(confirmed = false, log = log)
             }
+        }
+    } catch (e: Exception) {
+        log += "Error: ${e.message}"
+        PocResult(confirmed = false, log = log)
+    }
+}
+
+fun scanCorsMisconfig(url: String): PocResult {
+    val testOrigin = "https://cors-probe-${System.currentTimeMillis()}.invalid"
+    val log = mutableListOf("Target: $url", "Test Origin: $testOrigin")
+    return try {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", UA)
+            .header("Origin", testOrigin)
+            .build()
+        redirectFollowingClient.newCall(request).execute().use { resp ->
+            val allowOrigin = resp.header("Access-Control-Allow-Origin")
+            val allowCredentials = resp.header("Access-Control-Allow-Credentials")
+            log += "HTTP ${resp.code}"
+            log += "Access-Control-Allow-Origin: ${allowOrigin ?: "(not present)"}"
+            log += "Access-Control-Allow-Credentials: ${allowCredentials ?: "(not present)"}"
+
+            val reflectsArbitraryOrigin = allowOrigin == testOrigin
+            if (reflectsArbitraryOrigin) {
+                log += ""
+                log += "CONFIRMED: an arbitrary Origin is reflected back in Access-Control-Allow-Origin"
+                if (allowCredentials.equals("true", ignoreCase = true)) {
+                    log += "  [!] Combined with Allow-Credentials: true — any site can read authenticated responses"
+                }
+            } else if (allowOrigin == "*") {
+                log += ""
+                log += "Access-Control-Allow-Origin is a wildcard (*) — not itself a vulnerability unless " +
+                    "credentials are also allowed, which browsers block for wildcard origins"
+            }
+            PocResult(confirmed = reflectsArbitraryOrigin, log = log)
+        }
+    } catch (e: Exception) {
+        log += "Error: ${e.message}"
+        PocResult(confirmed = false, log = log)
+    }
+}
+
+private val SENSITIVE_PATHS = listOf(
+    "/.env", "/.env.local", "/.env.production", "/.git/HEAD", "/.git/config",
+    "/config.json", "/config.yml", "/package.json", "/server.js", "/app.js",
+    "/wp-config.php", "/phpinfo.php", "/.htaccess", "/web.config"
+)
+
+fun scanHiddenFileExposure(baseUrl: String): PocResult {
+    val log = mutableListOf("Target: $baseUrl")
+    val trimmed = baseUrl.trimEnd('/')
+    val found = mutableListOf<String>()
+
+    for (path in SENSITIVE_PATHS) {
+        try {
+            get("$trimmed$path").use { resp ->
+                if (resp.code == 200) {
+                    val preview = resp.body?.string().orEmpty().take(150)
+                    log += ""
+                    log += "ACCESSIBLE: $path -> HTTP 200"
+                    log += "  Preview: $preview"
+                    found += path
+                }
+            }
+        } catch (_: Exception) {
+            // Path unreachable or connection refused — not itself a finding.
+        }
+    }
+    return PocResult(confirmed = found.isNotEmpty(), log = log)
+}
+
+/**
+ * Reflects a marker containing HTML-special characters (no script tags or executable payload)
+ * to detect unescaped reflection — confirms the reflection surface exists without ever
+ * constructing or executing a working XSS payload.
+ */
+fun scanXssReflected(url: String, param: String): PocResult {
+    val marker = "fxss${System.currentTimeMillis() % 100000}"
+    val probe = "$marker\"'<>"
+    val log = mutableListOf("Target: $url ($param=<probe>)")
+    return try {
+        val separator = if (url.contains("?")) "&" else "?"
+        val encodedProbe = URLEncoder.encode(probe, "UTF-8")
+        get("$url$separator$param=$encodedProbe").use { resp ->
+            val body = resp.body?.string().orEmpty()
+            log += "HTTP ${resp.code}"
+            val rawReflected = body.contains(probe)
+            val markerReflected = body.contains(marker)
+            when {
+                rawReflected -> {
+                    log += ""
+                    log += "CONFIRMED: probe reflected unescaped, including \"'<> characters"
+                }
+                markerReflected -> {
+                    log += ""
+                    log += "Marker reflected but special characters appear escaped or stripped — not exploitable as-is"
+                }
+                else -> log += "Marker not found in response"
+            }
+            PocResult(confirmed = rawReflected, log = log)
         }
     } catch (e: Exception) {
         log += "Error: ${e.message}"

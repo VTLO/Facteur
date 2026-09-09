@@ -10,7 +10,10 @@ enum class PocScanType(val label: String) {
     HEALTH_UNAUTH("Unauthenticated health/status endpoint"),
     OPEN_REDIRECT("Open redirect via parameter"),
     IDOR("IDOR via numeric ID"),
-    OAUTH_DEVICE("OAuth device-code phishing pretext")
+    OAUTH_DEVICE("OAuth device-code phishing pretext"),
+    CORS_MISCONFIG("CORS misconfiguration"),
+    HIDDEN_FILE_EXPOSURE("Hidden file / secret exposure"),
+    XSS_REFLECTED("Reflected XSS probe")
 }
 
 data class PocResult(

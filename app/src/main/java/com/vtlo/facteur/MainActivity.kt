@@ -62,11 +62,14 @@ import com.vtlo.facteur.model.PocResult
 import com.vtlo.facteur.model.PocScanType
 import com.vtlo.facteur.network.FacteurRequestException
 import com.vtlo.facteur.network.IDOR_MAX_RANGE
+import com.vtlo.facteur.network.scanCorsMisconfig
 import com.vtlo.facteur.network.scanHealthUnauth
+import com.vtlo.facteur.network.scanHiddenFileExposure
 import com.vtlo.facteur.network.scanIdor
 import com.vtlo.facteur.network.scanOauthDevicePhishing
 import com.vtlo.facteur.network.scanOpenRedirect
 import com.vtlo.facteur.network.scanSsrLeak
+import com.vtlo.facteur.network.scanXssReflected
 import com.vtlo.facteur.network.sendHttpRequest
 import com.vtlo.facteur.ui.theme.FacteurTheme
 import kotlinx.coroutines.Dispatchers
@@ -380,6 +383,7 @@ fun PocScannerScreen() {
     var idorIdEnd by rememberSaveable { mutableStateOf("10") }
     var oktaDomain by rememberSaveable { mutableStateOf("") }
     var clientId by rememberSaveable { mutableStateOf("") }
+    var xssParam by rememberSaveable { mutableStateOf("q") }
 
     var isRunning by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<PocResult?>(null) }
@@ -517,6 +521,33 @@ fun PocScannerScreen() {
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+
+            PocScanType.CORS_MISCONFIG, PocScanType.HIDDEN_FILE_EXPOSURE -> {
+                OutlinedTextField(
+                    value = targetUrl,
+                    onValueChange = { targetUrl = it },
+                    label = { Text("Target URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            PocScanType.XSS_REFLECTED -> {
+                OutlinedTextField(
+                    value = targetUrl,
+                    onValueChange = { targetUrl = it },
+                    label = { Text("Target URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = xssParam,
+                    onValueChange = { xssParam = it },
+                    label = { Text("Query parameter to probe") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
 
         val canRun = !isRunning && when (scanType) {
@@ -543,6 +574,9 @@ fun PocScannerScreen() {
                                     idorIdEnd.toIntOrNull() ?: 10
                                 )
                                 PocScanType.OAUTH_DEVICE -> scanOauthDevicePhishing(oktaDomain, clientId)
+                                PocScanType.CORS_MISCONFIG -> scanCorsMisconfig(targetUrl)
+                                PocScanType.HIDDEN_FILE_EXPOSURE -> scanHiddenFileExposure(targetUrl)
+                                PocScanType.XSS_REFLECTED -> scanXssReflected(targetUrl, xssParam)
                             }
                         }
                         result = scanResult
