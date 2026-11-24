@@ -1,34 +1,65 @@
-name: Android Build
-
+name: Build Android APK with Fastlane
 on:
   push:
-    branches: ["**"]
+    branches: [ main ]
   pull_request:
-    branches: ["**"]
-
+    branches: [ main ]
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - name: Install Node dependencies
+        run: npm install
+      - name: Build web app
+        run: npm run build
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build debug APK
-        run: ./gradlew assembleDebug
-
+          java-version: '22'
+          distribution: 'temurin'
+          cache: 'gradle'
+      - name: Sync Capacitor
+        run: npx cap sync
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+      - name: Regenerate Gradle wrapper
+        working-directory: android
+        run: |
+          GRADLE_VERSION=$(awk -F'=' '/^distributionUrl/{print $2}' gradle/wrapper/gradle-wrapper.properties | grep -oP 'gradle-\K[0-9]+\.[0-9]+(\.[0-9]+)?(?=-(bin|all)\.zip)')
+          curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp/gradle-dist
+          "/tmp/gradle-dist/gradle-${GRADLE_VERSION}/bin/gradle" wrapper --gradle-version "${GRADLE_VERSION}" --distribution-type all
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+      - name: Build APK with Fastlane
+        run: bundle exec fastlane build
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: facteur-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: app-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish APK to GitHub Releases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --repo ${{ github.repository }} 2>/dev/null || true
+          gh release create latest \
+            --repo ${{ github.repository }} \
+            --title "Latest Debug Build" \
+            --notes "Automated debug APK build from commit ${{ github.sha }}" \
+            --latest \
+            android/app/build/outputs/apk/debug/app-debug.apk
